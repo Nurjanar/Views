@@ -1,5 +1,6 @@
 package ru.netology.nmedia.ui
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -7,12 +8,11 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.LinearInterpolator
 import androidx.core.content.withStyledAttributes
 import ru.netology.nmedia.R
 import ru.netology.nmedia.util.AndroidUtils
-import kotlin.math.cos
 import kotlin.math.min
-import kotlin.math.sin
 import kotlin.random.Random
 
 class StatsView @JvmOverloads constructor(
@@ -28,8 +28,9 @@ class StatsView @JvmOverloads constructor(
     private var lineWidth = AndroidUtils.dp(context, 5F).toFloat()
     private var fontSize = AndroidUtils.dp(context, 40F).toFloat()
     private var colors = emptyList<Int>()
-    private var absoluteData: List<Float> = emptyList()
-    private var dataPercent: List<Float> = emptyList()
+
+    private var progress = 0F
+    private var valueAnimator: ValueAnimator? = null
 
     init {
         context.withStyledAttributes(attrs, R.styleable.StatsView) {
@@ -43,31 +44,20 @@ class StatsView @JvmOverloads constructor(
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = lineWidth
-        strokeCap = Paint.Cap.BUTT
-        
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
     }
-    private val capPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
+
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         textAlign = Paint.Align.CENTER
         textSize = fontSize
     }
 
-    var data: List<Float>
-        get() = absoluteData
+    var data: List<Float> = emptyList()
         set(value) {
-            absoluteData = value
-            val total = absoluteData.sum()
-            if (total > 0) {
-                this.dataPercent = absoluteData.map {
-                    it / total
-                }
-            } else {
-                this.dataPercent = emptyList()
-            }
-            invalidate()
+            field = value
+            update()
         }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -80,38 +70,56 @@ class StatsView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (dataPercent.isEmpty()) {
+        if (data.isEmpty()) {
             return
         }
 
-        var startFrom = -90F
-        val capRadius = lineWidth / 2
-        paint.style = Paint.Style.STROKE
-        for ((index, datum) in dataPercent.withIndex()) {
-            val angle = 360F * datum
+        canvas.save()
+
+        val rotationAngle = 360f * progress
+        canvas.rotate(rotationAngle, center.x, center.y)
+
+        var startAngle = -90f
+        for ((index, segment) in data.withIndex()) {
+            val segmentAngle = 360f * segment
+            val sweepAngle = segmentAngle * progress
+
             paint.color = colors.getOrNull(index) ?: randomColor()
-            canvas.drawArc(oval, startFrom, angle, false, paint)
-            startFrom += angle
+            canvas.drawArc(oval, startAngle, sweepAngle, false, paint)
+
+            startAngle += segmentAngle
         }
-        capPaint.style = Paint.Style.FILL
-        startFrom = -90F
-        for ((index, datum) in dataPercent.withIndex()) {
-            val angle = 360F * datum
-            val endAngle = startFrom + angle
-            val radians = Math.toRadians(endAngle.toDouble())
-            val capX = center.x + radius * cos(radians).toFloat()
-            val capY = center.y + radius * sin(radians).toFloat()
-            capPaint.color = colors.getOrNull(index) ?: randomColor()
-            canvas.drawCircle(capX, capY, capRadius, capPaint)
-            startFrom = endAngle
-        }
+
+        canvas.restore()
+
         canvas.drawText(
-            "%.2f%%".format(dataPercent.sum() * 100),
+            "%.2f%%".format(data.sum() * 100),
             center.x,
             center.y + textPaint.textSize / 4,
             textPaint,
         )
     }
 
+    private fun update() {
+        valueAnimator?.cancel()
+        progress = 0F
+
+        valueAnimator = ValueAnimator.ofFloat(0F, 1F).apply {
+            addUpdateListener { anim ->
+                progress = anim.animatedValue as Float
+                invalidate()
+            }
+            duration = 1500
+            interpolator = LinearInterpolator()
+        }.also {
+            it.start()
+        }
+    }
+
     private fun randomColor() = Random.nextInt(0xFF000000.toInt(), 0xFFFFFFFF.toInt())
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        valueAnimator?.cancel()
+    }
 }
